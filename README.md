@@ -34,4 +34,5 @@ Substrate          BSV mainnet
 
 ## License
 
-MIT.
+Open BSV License v5 — see [`LICENSE`](LICENSE). The specs, and anything
+derived from them, are usable only on the Bitcoin SV blockchain, by design.
