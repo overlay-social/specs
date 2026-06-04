@@ -9,8 +9,8 @@ Applications read from the overlay, not from chain directly. The overlay runs BR
 | Topic | Admits | Lookup |
 |---|---|---|
 | `tm_peck` | Bitcoin Schema OP_RETURN content (posts, likes, follows, ...) | feed / search / thread |
-| `tm_peck-bio-handle` | HandleToken | `ls_peck-bio-handle` |
-| `tm_peck-bio-profile` | ProfileToken | `ls_peck-bio-profile` |
+| `tm_social-handle` | HandleToken | `ls_peck-bio-handle` |
+| `tm_social-profile` | ProfileToken | `ls_peck-bio-profile` |
 
 A lookup service: parses the layers, upserts a row keyed by outpoint, recomputes canonicality (canonical rule in [`01-token-state.md`](01-token-state.md)), persists Atomic-BEEF alongside the row for self-verifying hydration.
 

@@ -11,7 +11,7 @@ This repository documents the conventions that the [overlay.peck.to](https://ove
 - **Bitcoin Schema admission.** Content is written as `B + MAP + AIP` pushes inside `OP_FALSE OP_RETURN`, signed with canonical AIP (BSM-compact today). Any Bitcom-aware indexer can read it. See [`00-content-bitcoin-schema.md`](specs/00-content-bitcoin-schema.md).
 - **Token-state decode (ProfileToken / HandleToken).** Identity entities live as 1Sat UTXOs with a three-layer envelope (ord-inscription / MAP tags / sCrypt state). The overlay decodes `@prop` state out of the locking script and tracks the canonical, unspent token per subject. See [`01-token-state.md`](specs/01-token-state.md).
 - **Identity projection - the killer feature.** A single batch call resolves a whole feed page of authors to their canonical ProfileToken state, and the renderer defensively overwrites display name / avatar / handle. SSO-feel across apps with no server session. See [`02-identity-projection.md`](specs/02-identity-projection.md).
-- **Topic-rooted overlay state.** Each topic manager (`tm_peck-bio-profile`, `tm_peck-bio-handle`, `tm_peck`) admits outputs and serves REST hydration. See [`03-overlay-topics.md`](specs/03-overlay-topics.md).
+- **Topic-rooted overlay state.** Each topic manager (`tm_social-profile`, `tm_social-handle`, `tm_peck`) admits outputs and serves REST hydration. See [`03-overlay-topics.md`](specs/03-overlay-topics.md).
 
 ## What is designed but not yet built (ROADMAP)
 
