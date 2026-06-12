@@ -10,7 +10,7 @@ As BSV scales (Teranode era), single-overlay re-derivation from chain becomes un
 
 - **Topic-rooted Merkle trees** served at `/v1/topic/{topic}/root`, `/snapshot?block=N`, `/delta`.
 - **GASP / subtree-based sync** between overlays, mirroring Teranode's subtree architecture; near-constant-time bootstrap regardless of chain depth.
-- **On-chain state-root anchoring** - overlays periodically commit topic roots to chain (OP_RETURN or token-state) so overlay-derived state is itself attested.
+- ~~**On-chain state-root anchoring**~~ — **graduated to IMPLEMENTED**: prev-chained 1Sat anchor ordinals, anchor-on-change scheduler, `GET /state` exposes `anchor.matchesLive`. See [`08-state-anchoring.md`](08-state-anchoring.md).
 - **N-of-M peer acceptance** - apps may require agreement among M peers before treating a record as authoritative; an overlay publishing an inconsistent root becomes detectable and isolatable.
 - **Idempotent submission** - every submission carries a content-hash/nonce; repeat submissions return the same response (>=24h dedup window), eliminating the missed-response failure mode.
 
