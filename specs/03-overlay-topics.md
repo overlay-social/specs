@@ -6,17 +6,23 @@ Applications read from the overlay, not from chain directly. The overlay runs BR
 
 ## 1. Topic managers (live)
 
-| Topic | Admits | Lookup |
+| Topic | Admits | Spec |
 |---|---|---|
-| `tm_peck` | Bitcoin Schema OP_RETURN content (posts, likes, follows, ...) | feed / search / thread |
-| `tm_social-handle` | HandleToken | `ls_peck-bio-handle` |
-| `tm_social-profile` | ProfileToken | `ls_peck-bio-profile` |
+| `tm_social-content` | Bitcoin Schema OP_RETURN content (posts, likes, follows, ...) | [`00`](00-content-bitcoin-schema.md) |
+| `tm_social-profile` | ProfileToken (token-state) | [`01`](01-token-state.md) |
+| `tm_social-handle` | HandleToken (token-state) | [`01`](01-token-state.md) |
+| `tm_social-friend` | friend/unfriend attestations (mutual consent) | [`07`](07-social-friend.md) |
+| `tm_key-binding` | posting-key ↔ identity-root bindings | [`06`](06-identity-attestations.md) |
+| `tm_identity-profile` | light profile attestations | [`06`](06-identity-attestations.md) |
+| `tm_identity-handle` | light handle claims (first-come) | [`06`](06-identity-attestations.md) |
+| `tm_identity-cert` | BRC-52 cert publications | [`06`](06-identity-attestations.md) |
+| `tm_overlay-anchor` | state-root anchor ordinals | [`08`](08-state-anchoring.md) |
 
 A lookup service: parses the layers, upserts a row keyed by outpoint, recomputes canonicality (canonical rule in [`01-token-state.md`](01-token-state.md)), persists Atomic-BEEF alongside the row for self-verifying hydration.
 
 ## 2. Topic-rooted state (normative)
 
-Each topic maintains a state representation that is committed as a Merkle root, so topic-state-at-block-N is a verifiable commitment, not just a cache. Today a single overlay serves this; the inter-overlay sync and on-chain anchoring of these roots is roadmap.
+Each topic maintains a state representation committed as a Merkle root, so topic-state-at-block-N is a verifiable commitment, not just a cache. The roots are **anchored on-chain** and auditable — see [`08-state-anchoring.md`](08-state-anchoring.md). Inter-overlay sync remains roadmap ([`04`](04-federation-roadmap.md)).
 
 ## 3. REST hydration (live)
 
