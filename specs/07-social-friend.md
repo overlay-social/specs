@@ -1,88 +1,93 @@
-# 07 - Friend: mutual-consent relationships (`tm_social-friend`)
+# 07 — Friend: mutual-consent relationships
 
-**Status: IMPLEMENTED** (overlay.peck.to; consumed live by peck.to —
-friendship gates direct messaging). Friend is a RELATION, not an identity
-primitive — hence the `tm_social-*` family — but it uses the same BRC-3
-self-attestation envelope as [`06-identity-attestations.md`](06-identity-attestations.md).
+- Status: IMPLEMENTED
+- Revision: 2
+- Date: 2026-10-26
 
-## 0. Why friend ≠ follow
+> **In short.** Following someone is one-way; being friends takes both
+> people. Each person writes a small signed "friend" record pointing at the
+> other. When both records exist, the two are friends, and apps can unlock
+> things that need consent, such as private messages. Either side can later
+> withdraw their own record; neither can speak for the other.
 
-Follow is one-way interest. Friend is a **mutual relationship** that gates
-person-to-person capabilities (DMs first). In the BAP era the friend record
-existed to *publish a messaging public key*; under BRC-100/BRC-42 key
-exchange is **implicit** (ECDH between identity roots), so the record's job
-reduces to what actually remains: **consent + discovery**.
+## 0. Why friend is not follow
+
+Follow is one-way interest. Friend is a mutual relationship that gates
+person-to-person features. In the older BAP-era protocol a friend record
+existed to publish a messaging key. Under BRC-100 the two identity roots
+already give a shared key (BRC-42), so the record's job is only consent and
+discovery.
 
 ## 1. Record (normative)
 
-MAP `SET` in `OP_FALSE OP_RETURN`, BRC-3 self-signed (envelope and
-verification exactly as in spec 06 §0):
+The shared envelope of [06 §0](06-identity-attestations.md), protocol name
+`friend`:
 
 ```
-PREIMAGE: app type schema_version identity peer serial
-fields:   type     = "friend" | "unfriend"
-          identity = SENDER identity root pubkey (66-hex compressed)
-          peer     = TARGET identity root pubkey
-          serial   = random nonce (= BRC-42 keyID for sig)
-          sig      = BRC-3 self-signature, protocolID [1,'friend'],
-                     counterparty = identity
-constraints: identity != peer; both match /^0[23][0-9a-fA-F]{64}$/
+preimage keys: app type schema_version identity peer serial
+type      friend | unfriend
+identity  the sender's identity root (66 hex)
+peer      the other person's identity root (66 hex)
+sig       the sender's BRC-3 signature, protocol friend, key ID serial
 ```
 
-Only the *sender's* signature exists on a record: you can declare or revoke
-**your own** side of a relationship, never your peer's.
+`identity` MUST differ from `peer`; both match `^0[23][0-9a-fA-F]{64}$`. A
+record carries only the sender's signature: you can declare or withdraw your
+own side, never your peer's.
 
 ## 2. Mutuality (normative)
 
 ```
-friend(A→B)               = request
-friend(B→A)               = accept
-ACTIVE  ⇔  both directions admitted and unrevoked
+friend(A→B)                                   request
+friend(B→A)                                   acceptance
+ACTIVE  ⇔  both directions admitted and not withdrawn
 ```
 
-Two independent one-way attestations form a pair. There is no distinguished
-"accept" record type — the second direction *is* the acceptance. Asynchronous
-by construction: each side signs from their own wallet, in their own time.
+There is no separate acceptance record; the second direction is the
+acceptance. Each side signs from their own wallet, in their own time.
 
-## 3. Revocation (normative)
+## 3. Withdrawal (normative)
 
-`type=unfriend` (same preimage shape, same signature scheme) revokes **the
-emitting side's** direction: the overlay marks every unspent
-`friend(identity→peer)` row spent. The peer's direction is untouched — if A
-unfriends, B's standing consent remains, so A sees an *incoming request*
-and can re-accept later with a single new `friend(A→B)`. Withdrawing a
-not-yet-accepted request is the same operation.
+`type unfriend` withdraws the sender's direction: every earlier `friend` record
+from `identity` to `peer` stops counting. The peer's direction is untouched.
+If A unfriends B, B's consent stands, A sees an incoming request, and one new
+`friend(A→B)` restores the pair. Withdrawing a request that was never
+accepted is the same operation.
 
-## 4. Read API (live)
+"Earlier" is admission order on the overlay. An `unfriend` record itself is
+never part of the active set.
+
+## 4. Read API
 
 ```
-GET /v1/friends/:subject        # subject = identity root pubkey
--> { light: { mutual:      [{peer, handle}],
-              pending_in:  [{peer, handle}],
-              pending_out: [{peer, handle}] },
-     data:  { outgoing: [...], incoming: [...] } }   # legacy BAP-era rows
+GET /v1/friends/:key        # key = identity root (66 hex)
+→ { "status": "ok", "address": "<key>",
+    "light": { "mutual":      [{ "peer": "<key>", "handle": "<handle>" | null }],
+               "pending_in":  [ ... ],
+               "pending_out": [ ... ] },
+    "outgoing": <n>, "incoming": <n>,
+    "data": { "outgoing": [...], "incoming": [...] } }   # legacy BAP-era rows
 ```
 
-`handle` is hydrated from the canonical light handle claim (spec 06 §3).
-Incoming friend records also surface as `type=friend_request` items in
-`GET /v1/notifications/:address` (resolved through the key-binding layer).
+`handle` comes from the canonical light handle claim
+([06 §3](06-identity-attestations.md)). Incoming friend records also appear as
+`friend_request`, or `friend_accepted` when the recipient had already sent a
+request, in `GET /v1/notifications/:address`.
 
 ## 5. Legacy Bitcoin Schema compatibility
 
-The record IS Bitcoin Schema — same MAP envelope, same `type=friend`
-vocabulary — so any bmap-style indexer parses it; it simply carries
-`identity`/`peer`/`sig` instead of the BAP era's `bapID`/`publicKey`
-(which existed to publish a key that BRC-42 now derives). Legacy rows are
-indexed and served **display-only**: they never count toward mutual, and
-there is no cross-era identity mapping.
+The record is Bitcoin Schema: the same MAP envelope and the same
+`type friend` word, so any MAP indexer parses it. It carries
+`identity`/`peer`/`sig` instead of the BAP era's `bapID`/`publicKey`. Legacy
+rows are indexed and shown for display only. They never count toward
+`mutual`, and there is no mapping between the two eras' identities.
 
 ## 6. What friendship gates (informative)
 
-The reference deployment gates direct messaging on mutual friendship:
-DM content is BRC-42-encrypted between the identity roots
-(`protocolID [2,'peck dm']`) and transported via a BRC-103 mutual-auth
-message-box — the consent handshake lives on-chain, the message content
-never does (an optional publish-permanent path, which would also be
-Bitcoin-Schema `type=message` compatible, is roadmap). Enforcement today is
-client-side; receiver-side filtering against the friend graph is the
-intended hardening.
+The reference apps allow direct messages only between mutual friends. A
+message is encrypted by the sender's wallet to the recipient (BRC-2
+encryption under a BRC-42 key, protocol `[2, 'peck dm']`, key ID `'1'`,
+counterparty the other identity root) and carried by a message box with
+mutual authentication (BRC-103/104). The consent is on chain; the messages
+are not. The check is done by the clients today; filtering at the
+recipient's message box is planned.
