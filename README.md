@@ -1,41 +1,126 @@
 # overlay.social specs
 
-Open specifications for **sovereign, BRC-100-native social applications on BSV**.
+Open specifications for social applications on BSV that keep the user's
+data and identity in the user's own hands.
 
-This repository documents the conventions that the [overlay.peck.to](https://overlay.peck.to) reference deployment actually runs, plus the roadmap toward a federated overlay layer. It is deliberately split so you can tell the two apart at a glance.
+## What is overlay.social, in plain words
 
-> **Honesty contract.** Every spec file declares a `Status:` of `IMPLEMENTED`, `PARTIAL`, or `ROADMAP` in its header. If it says `IMPLEMENTED`, there is code running in production against it today. If it says `ROADMAP`, it is a design we intend to build - do not assume an endpoint exists because it is described here.
+When you post on a normal social network, the company owns the database: your
+posts, your name and who you follow live on its servers, and it decides what
+others see. overlay.social is a set of rules for doing the same things
+differently. Each post, profile or friendship is a small record the user signs
+with their own wallet and writes to the BSV blockchain, where nobody can
+change or remove it. Servers called overlays collect those records, check them
+and serve them quickly to apps, but any app can read the same records, and
+anyone can check an overlay's answers against the chain. You can change apps
+without losing your name, your posts or your friends. These documents say
+exactly how the records are written and read, so that independent apps and
+overlays agree.
 
-## What runs today (IMPLEMENTED)
+## Honesty contract
 
-- **Bitcoin Schema admission.** Content is written as `B + MAP + AIP` pushes inside `OP_FALSE OP_RETURN`, signed with canonical AIP (BSM-compact today). Any Bitcom-aware indexer can read it. See [`00-content-bitcoin-schema.md`](specs/00-content-bitcoin-schema.md).
-- **Token-state decode (ProfileToken / HandleToken).** Identity entities live as 1Sat UTXOs with a three-layer envelope (ord-inscription / MAP tags / sCrypt state). The overlay decodes `@prop` state out of the locking script and tracks the canonical, unspent token per subject. See [`01-token-state.md`](specs/01-token-state.md).
-- **Identity projection - the killer feature.** A single batch call resolves a whole feed page of authors to their canonical ProfileToken state, and the renderer defensively overwrites display name / avatar / handle. SSO-feel across apps with no server session. See [`02-identity-projection.md`](specs/02-identity-projection.md).
-- **Topic-rooted overlay state.** Topic managers admit outputs and serve REST hydration — content (`tm_social-content`), token-state identity (`tm_social-profile`/`-handle`), light identity attestations (`tm_key-binding`, `tm_identity-profile`/`-handle`/`-cert`) and relationships (`tm_social-friend`). See [`03-overlay-topics.md`](specs/03-overlay-topics.md).
-- **Light identity attestations.** BRC-3 self-signed profiles, first-come handle claims, key-binding (posting key ↔ identity root with mutual signatures) and cert publication — resolution collapses bound keys everywhere. See [`06-identity-attestations.md`](specs/06-identity-attestations.md).
-- **Friend: mutual-consent relationships.** Two one-way BRC-3 attestations form an active pair; unfriend revokes one side; friendship gates DMs (BRC-42-encrypted, message-box transport). Bitcoin-Schema-compatible vocabulary. See [`07-social-friend.md`](specs/07-social-friend.md).
-- **On-chain state-root anchoring.** Every topic's Merkle root anchors to chain as a prev-chained 1Sat ordinal; the scheduler anchors on change, autonomously, and `GET /state` exposes `anchor.matchesLive` so anyone can audit served state against Bitcoin. See [`08-state-anchoring.md`](specs/08-state-anchoring.md).
+Every spec declares a status:
 
-## What is designed but not yet built (ROADMAP)
+- **IMPLEMENTED**: code runs in production against it today.
+- **PARTIAL**: some of it runs; the spec says which part.
+- **ROADMAP**: a design we intend to build. Do not assume an endpoint exists
+  because it is described.
 
-- **Federated overlay sync** - GASP / subtree-rooted topic Merkle trees, N-of-M peer acceptance, idempotent submission. (On-chain state-root anchoring has graduated to IMPLEMENTED — see [`08-state-anchoring.md`](specs/08-state-anchoring.md).) See [`04-federation-roadmap.md`](specs/04-federation-roadmap.md).
-- **Additional write channels & token economics** - input-script-data (payment-coupled actions), PostToken marketplace, paywall via BRC-104 channels, Teranode Kafka direct-consume, the Bitcoin-Schema hybrid bridge for token-state posts. See [`05-write-channels-roadmap.md`](specs/05-write-channels-roadmap.md).
+Each spec starts with a header (`Status`, `Revision`, `Date`) and an "In
+short" block in plain language. The "In short" block is an introduction, not
+part of the normative text. In the normative text, MUST, SHOULD and MAY are
+used as in RFC 2119 and RFC 8174. Terms are explained in
+[`GLOSSARY.md`](GLOSSARY.md).
 
-## Reference deployment & data reality
+## Reading order
 
-The live reference is overlay.peck.to, consumed by peck-web (peck.to). As of this writing only a handful of ProfileToken owners exist on mainnet; most feed authors are bare P2PKH addresses with **no** ProfileToken. The identity projection is built to degrade gracefully for them - unresolved authors are simply omitted and the renderer falls back to a truncated address. Read [`02-identity-projection.md`](specs/02-identity-projection.md) data-reality section before assuming a full identity graph exists.
+| # | Spec | Status |
+|---|---|---|
+| — | [Glossary](GLOSSARY.md) | — |
+| 00 | [Content records (Bitcoin Schema)](specs/00-content-bitcoin-schema.md) | IMPLEMENTED |
+| 03 | [Overlay topics, submission and read API](specs/03-overlay-topics.md) | IMPLEMENTED (one overlay) |
+| 06 | [Self-signed records: identity, key-binding, certificates, lenses, classifications](specs/06-identity-attestations.md) | IMPLEMENTED; classifications PARTIAL |
+| 02 | [Identity resolution](specs/02-identity-projection.md) | IMPLEMENTED |
+| 07 | [Friend: mutual-consent relationships](specs/07-social-friend.md) | IMPLEMENTED |
+| 08 | [State anchoring](specs/08-state-anchoring.md) | IMPLEMENTED; outpoint-set listing ROADMAP |
+| 09 | [Documents](specs/09-documents.md) | PARTIAL |
+| 01 | [Token-state identity (ProfileToken, HandleToken)](specs/01-token-state.md) | IMPLEMENTED |
+| 05 | [Additional write channels and token economics](specs/05-write-channels-roadmap.md) | ROADMAP; token/post bridge PARTIAL |
+| 04 | [Federation](specs/04-federation-roadmap.md) | ROADMAP |
+
+Start with 00 (how a record is written) and 03 (how an overlay takes and
+serves it). 06, 02 and 07 cover identity and relationships, 08 and 09 how
+state and documents are pinned to the chain. 01, 05 and 04 are the older
+token family and the roadmap.
+
+## What runs today and what does not
+
+Runs today (reference deployment):
+
+- Content records with BRC77 or Bitcoin Signed Message signatures, replies,
+  quotes, reposts, likes, follows, tips, channels, locations.
+- Topic managers for content, both identity families, key-bindings,
+  certificates, friendships, lenses and classifications.
+- Identity resolution in one batch call, with bound keys collapsed.
+- The `/v2` read model `peck-view/v1`.
+- State roots for 12 topics, anchored on chain whenever they change.
+- Document revisions as posts (`kind doc`), admitted, listed and anchored.
+
+Not built yet:
+
+- A read model for document history (09), and serving the outpoint sets
+  behind state roots (08).
+- Federation between overlays (04).
+- Input-script data, PostToken, paid content, Teranode direct consume (05).
 
 ## Layer map
 
 ```
-Application        peck.to / peck.bio / peck.ink / Margin
-Read/sync          overlay (BRC-22 topic managers, REST hydration)   <- single overlay today; federation = roadmap
-Write channels     OP_RETURN Bitcoin Schema (live) / token-state (live) / input-script-data (roadmap)
-Identity/content   BRC-100 / BRC-43 / BRC-52 / BRC-77 / BRC-104
-Substrate          BSV mainnet
+Application     any app (reference apps: peck.to, peck.bio, peck.press, peck.world)
+Read            overlay: topic managers, /v1 and /v2 over HTTP      one overlay today; federation is roadmap
+Write           OP_RETURN content records (live), token state (live), input-script data (roadmap)
+Identity        BRC-100 wallets, BRC-42/43 key derivation, BRC-3/77 signatures, BRC-52 certificates
+Substrate       BSV mainnet
 ```
+
+## Reference deployment
+
+The reference overlay is [overlay.peck.to](https://overlay.peck.to). Its
+reference client library is [overlay-social/sdk](https://github.com/overlay-social/sdk).
+Neither is the standard: another overlay that follows these specs serves the
+same records.
+
+## Open questions
+
+- Light handle claims (06 §3) and friend withdrawals (07 §3) are ordered by
+  admission on one overlay. Two overlays could order them differently. A
+  chain-derived order (block height and position, as in 09 §4.2) would make
+  them agree.
+- Key-binding precedence uses the writer-supplied `boundAt` (06 §1), not the
+  chain.
+- A lens `category` rule matches classifications from any classifier (06 §6).
+  Lenses may need to name the classifiers they trust.
+
+## Publishing history
+
+These specs will be published on chain as documents in the format of
+[09](specs/09-documents.md): each file will be the document
+`overlay.social/specs/NN`, each revision a signed post, and every later fix
+a new revision that points at the one before.
+
+The plan:
+
+- Revision 1 of specs 00–08 will be their earlier text, as of commit
+  `5687a08` in this repository, so the chain keeps a record of what that
+  version claimed.
+- Revision 2 of specs 00–08, and revision 1 of spec 09, will be the text of
+  this revision of the repository.
+- The publishing identity key and the txid of each published revision will be
+  listed here once they exist.
+
+Nothing has been published on chain yet.
 
 ## License
 
-Open BSV License v5 — see [`LICENSE`](LICENSE). The specs, and anything
+Open BSV License v5. See [`LICENSE`](LICENSE). The specs, and anything
 derived from them, are usable only on the Bitcoin SV blockchain, by design.
