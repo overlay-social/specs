@@ -1,63 +1,99 @@
-# 02 - Identity projection (the killer feature)
+# 02 — Identity resolution
 
-**Status: IMPLEMENTED** (overlay.peck.to, consumed live by peck.to). Reference: `peck-web/overlay_client.py::resolve_identities` + `peck-web/routers/pages.py::_enrich_with_profile_tokens`.
+- Status: IMPLEMENTED
+- Revision: 2
+- Date: 2026-10-26
 
-Identity projection turns raw on-chain authors (P2PKH addresses or pubkeys) into rich, canonical identities at render time - **one batch call per feed page**, with the renderer defensively overwriting display name / avatar / handle. It gives cross-app SSO-feel with no server session and no central identity registry: identity lives in token-state, the overlay just projects it.
+> **In short.** On chain, a post is signed by a key or an address, not by a
+> name. Identity resolution turns those keys into the name, @handle and
+> picture the person published about themselves, for a whole page of posts in
+> one request. Every app that asks the same overlay gets the same answer,
+> without a login server or a central user database. Authors who never
+> published a profile simply come back unresolved, and apps show a shortened
+> key instead.
 
-## 1. Batch resolve (normative)
+## 1. Sources and precedence (normative)
+
+An identity is an identity root key (66-hex compressed public key). Its
+display fields come from, in order of preference:
+
+1. the canonical light profile and light handle claim
+   ([06](06-identity-attestations.md));
+2. the canonical ProfileToken and HandleToken ([01](01-token-state.md)).
+
+A light value overrides the token value field by field: `displayName`,
+`avatarRef` and `bio` from the light profile, `handle` from the light handle
+claim. `profileOutpoint` names the record the profile came from.
+
+**Bound keys collapse.** A posting key bound to an identity root by an
+unspent key-binding ([06 §1](06-identity-attestations.md)), or that key's
+P2PKH address, resolves to the root's identity. When one key has several
+unspent bindings, the one with the lowest `boundAt` wins.
+
+## 2. Batch resolve (normative)
 
 ```
 POST /v1/identities/resolve
-body: { "addresses": ["<base58>", ...], "pubkeys": ["<hex>", ...] }   // either or both, max 200 each
--> 200 { "identities": { "<input-key>": {
-        "pubkey": "<hex>",
-        "address": "<base58>",
-        "handle": "<handle|null>",
-        "displayName": "<string|null>",
-        "avatarRef": "<uhrp://...|null>",
-        "profileOutpoint": "<txid.vout>"
-      } } }
+body:  { "pubkeys": ["<66 hex>", ...], "addresses": ["<base58 P2PKH>", ...] }
+200:   { "status": "ok", "count": <n>,
+         "identities": { "<input string>": {
+           "pubkey": "<identity root, hex>",
+           "address": "<P2PKH of the root>",
+           "handle": "<handle>" | null,
+           "displayName": "<string>" | null,
+           "avatarRef": "<uhrp://… | https://… | …>" | null,
+           "profileOutpoint": "<txid.vout>" | null,
+           "bio": "<string>"                       // present only when a light profile has one
+         } } }
 ```
 
-Rules:
-- The result is keyed on the **exact input string**: an address-input yields an address-key, a pubkey-input yields a pubkey-key. Feed authors are P2PKH base58 (the `author` column) so pass them as `addresses`. Pubkey-hex subjects go in `pubkeys`.
-- Inputs **without** a canonical, unspent ProfileToken are **omitted** from the dict (ghost authors). This is intended, not an error.
-- Call it **once per feed page**, never per row.
+- At least one of `pubkeys`, `addresses` MUST be an array. Each list is
+  de-duplicated and capped at 200; entries that are not well-formed are
+  dropped silently. Pubkeys are compared lowercase; addresses as given.
+- The result is keyed by the exact input string.
+- An input that resolves to nothing is omitted. This is the normal case for
+  most authors, not an error.
+- An address resolves when it is the address of a bound posting key, or the
+  address of a ProfileToken `subject`. An address whose identity has only
+  light records and no binding does not resolve through the address lane;
+  resolve it by key.
+- Clients SHOULD call it once per page of posts, never once per post.
 
-## 2. Companion lookups (normative)
+## 3. Single lookups
 
-- `GET /identity/:pubkey` - full bundle for one identity.
-- `GET /resolve/:handle` - handle to pubkey + deep-links into consuming apps.
-- `GET /v1/bio/profile?subject=<pk> | owner=<pk> | outpoint=<txid.vout>` - raw ProfileToken state.
-- `GET /v1/bio/handle/:handle` - HandleToken by handle.
-- `GET /cert/verify/:sha` - verify a BRC-52 cert reference.
+- `GET /identity/:pubkey`: the full bundle for one identity, including its
+  bound `signingKeys`.
+- `GET /identity/:subject/signing-keys`, `GET /identity/:subject/certs`.
+- `GET /resolve/:handle`: handle to identity key (light claim first, then
+  HandleToken), with deep links into the reference apps.
+- `GET /v1/identities`: canonical identities, newest first.
+- `/v2` serves the same identity already joined into every post as an
+  `AuthorView` ([03 §6](03-overlay-topics.md)).
 
-## 3. Defensive overwrite (normative)
+## 4. Rendering (informative)
 
-The renderer treats overlay ProfileToken state as canonical and overwrites the post's own display name / avatar / handle - but **the enrichment must never break the feed**. The reference does exactly this: one batch call, overwrite only the keys present, return the input untouched on any error or empty result.
+A renderer treats the resolved fields as canonical and overwrites the
+display name, handle and picture a post carries, but resolution must never
+break a feed: on any error or empty answer, render the post with its own
+fields or a shortened key.
 
 ```python
-# reference shape - overlay_client.resolve_identities + pages._enrich_with_profile_tokens
 async def enrich(posts):
-    addrs = [p["author"] for p in posts if p.get("author")]
-    idents = await resolve_identities(addresses=addrs)   # {} on any error -> feed never bricks
+    idents = await resolve(addresses=[p["author"] for p in posts if p.get("author")])  # {} on error
     for p in posts:
         ident = idents.get(p["author"])
-        if not ident:                # ghost author: no ProfileToken yet -> leave fallback
-            continue
-        if ident.get("displayName"): p["ui_display_name"] = ident["displayName"]
-        if ident.get("handle"):      p["ui_handle"]       = ident["handle"]
-        if ident.get("avatarRef"):   p["u_avatar_url"]    = uhrp(ident["avatarRef"])
-        p["profile_outpoint"] = ident.get("profileOutpoint")
+        if not ident:
+            continue                      # unresolved author: keep the fallback
+        for src, dst in (("displayName", "name"), ("handle", "handle"), ("avatarRef", "avatar")):
+            if ident.get(src):
+                p[dst] = ident[src]
     return posts
 ```
 
-## 4. Why this is the killer feature
+## 5. Trust (informative)
 
-- **No server session.** The identity is projected from chain state on every render; any app reading the same overlay sees the same identity. That is SSO without a session store.
-- **Sovereign.** The user owns the ProfileToken; the overlay cannot forge displayName/avatar - it only projects what the token says.
-- **Composable.** `/resolve/:handle` returns deep-links so peck.bio, peck.to, peck.ink resolve the same handle to their own surfaces.
-
-## 5. Data reality (read this)
-
-As of this writing only ~4 ProfileToken owners exist on mainnet. For every other author `resolve` returns nothing, and the renderer falls back to a truncated address (or a legacy users-table row, where one exists). So today the projection **lights up for a handful of identities and is a graceful no-op for the rest**. It is correct and forward-compatible: as users mint ProfileTokens (or existing v0 profiles are backfilled), they light up automatically with zero renderer changes. Do not design UX that assumes a populated identity graph yet.
+Every field comes from a record the identity signed (light records) or a
+token it controls, so an overlay that served an invented or altered value
+would be caught by any client that checks. An overlay can still omit an
+identity or serve a stale one. A client that needs certainty fetches the
+record named by `profileOutpoint` from the chain and verifies it.
